@@ -4,11 +4,14 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <DFRobotDFPlayerMini.h>
+// --- THƯ VIỆN CHỐNG SỤT ÁP ---
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 
 // ==================== CẤU HÌNH WIFI & SERVER ====================
-const char* ssid = "notB";
-const char* password = "22222222";
-// Lưu ý: IP Server phải đúng. Đảm bảo server đang chạy file server_batch.py
+const char* ssid = "notB";       // Đổi lại nếu dùng Hotspot điện thoại
+const char* password = "22222222"; 
+// Nhớ đổi IP nếu máy tính đổi IP
 const char* server_url = "http://10.113.168.50:5000/detect"; 
 
 // ==================== DANH SÁCH 113 VẬT THỂ ====================
@@ -28,21 +31,18 @@ const char* OBJECT_NAMES[] = {
 };
 const int TOTAL_CLASSES = 113;
 
-// ==================== CẤU HÌNH PHẦN CỨNG ====================
-LiquidCrystal_I2C lcd(0x3F, 16, 2); // Đã đổi thành 0x3F theo màn hình của bạn
+// ==================== PHẦN CỨNG ====================
+LiquidCrystal_I2C lcd(0x3F, 16, 2); 
 
-// DFPlayer (Hardware Serial 2)
 #define DFPLAYER_RX_PIN 13 
 #define DFPLAYER_TX_PIN 12 
 DFRobotDFPlayerMini dfPlayer;
 
-// Biến toàn cục
 String current_objects = "";
 String last_objects = ""; 
 String last_display = "";
 bool wifi_ok = false;
 bool cam_ok = false;
-bool is_scanning = false; // Biến trạng thái để hiển thị LCD
 
 // ==================== CAMERA PINS ====================
 #define PWDN_GPIO_NUM     32
@@ -62,108 +62,14 @@ bool is_scanning = false; // Biến trạng thái để hiển thị LCD
 #define HREF_GPIO_NUM     23
 #define PCLK_GPIO_NUM     22
 
-// ==================== HÀM PHÁT LOA ====================
-void speak() {
-  // Nếu server trả về "scanning" hoặc "none" hoặc rỗng -> Không phát loa
-  if (current_objects == "scanning" || current_objects == "none" || current_objects == "") return;
-  
-  // Nếu vật thể giống lần trước -> Không phát lại (tránh nói lặp)
-  if (current_objects == last_objects) return; 
-
-  last_objects = current_objects;
-  Serial.println(">>> CHOT KET QUA: " + current_objects);
-
-  int fileIndex = -1;
-  for (int i = 0; i < TOTAL_CLASSES; i++) {
-    if (current_objects.indexOf(OBJECT_NAMES[i]) != -1) {
-      fileIndex = i + 1;
-      break;
-    }
-  }
-  
-  if (fileIndex != -1) {
-    Serial.print("Playing MP3: "); Serial.println(fileIndex);
-    dfPlayer.play(fileIndex);
-    delay(2000); // Chờ loa nói xong câu rồi mới chụp tiếp
-  }
-}
-
-// ==================== HÀM HIỂN THỊ LCD ====================
-void updateLCD() {
-  // Hiển thị trạng thái "Đang quét" để người dùng biết máy đang chạy nhanh
-  if (current_objects == "scanning") {
-     if (last_display != "scanning") {
-        lcd.clear();
-        lcd.setCursor(0, 0); lcd.print("AI Processing...");
-        lcd.setCursor(0, 1); lcd.print("Capturing batch");
-        last_display = "scanning";
-     }
-     return;
-  }
-
-  // Hiển thị kết quả cuối cùng
-  if (current_objects == last_display) return;
-  last_display = current_objects;
-
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Result:");
-  
-  lcd.setCursor(0, 1);
-  if (current_objects == "none" || current_objects == "") {
-    lcd.print("No Object Found");
-  } else {
-    String show = current_objects;
-    if (show.length() > 16) show = show.substring(0, 16);
-    lcd.print(show);
-  }
-}
-
-// ==================== GỬI ẢNH TỐC ĐỘ CAO ====================
-void sendFrame() {
-  if (WiFi.status() != WL_CONNECTED) return;
-
-  camera_fb_t *fb = esp_camera_fb_get();
-  if (!fb) {
-    Serial.println("Cam Capture Fail");
-    return;
-  }
-
-  HTTPClient http;
-  // setReuse giúp giữ kết nối mở, gửi nhanh hơn
-  http.setReuse(true); 
-  http.begin(server_url);
-  http.addHeader("Content-Type", "image/jpeg"); 
-
-  // Gửi ảnh (buffer)
-  int httpCode = http.POST(fb->buf, fb->len);
-
-  if (httpCode == 200) {
-    String payload = http.getString();
-    payload.trim();
-    
-    // Server trả về "scanning" nghĩa là chưa đủ 10 ảnh -> Gửi tiếp
-    // Server trả về Tên Vật Thể nghĩa là đã chốt -> Xử lý
-    if (payload.length() > 0) {
-      current_objects = payload;
-      if (payload == "scanning") {
-         Serial.print("."); // In dấu chấm để biết đang chụp liên tục
-      } else {
-         Serial.println("\nDONE! Server said: " + payload);
-      }
-    }
-  } else {
-    Serial.printf("HTTP Error: %d\n", httpCode);
-  }
-
-  http.end();
-  esp_camera_fb_return(fb); 
-}
-
 // ==================== SETUP ====================
 void setup() {
+  // --- QUAN TRỌNG NHẤT: TẮT BROWNOUT DETECTOR ---
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); 
+  // ----------------------------------------------
+
   Serial.begin(115200);
-  Serial.println("\n=== ESP32-CAM FAST MODE ===");
+  Serial.println("\n=== ESP32-CAM ANTI-BROWNOUT ===");
 
   // 1. LCD
   Wire.begin(15, 14); 
@@ -185,9 +91,10 @@ void setup() {
     delay(200); Serial.print(".");
   }
   Serial.println("\nWiFi OK!");
+  wifi_ok = true;
   lcd.setCursor(0, 1); lcd.print("WiFi OK!      ");
 
-  // 4. Camera (CẤU HÌNH TỐI ƯU TỐC ĐỘ)
+  // 4. Camera
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -208,17 +115,18 @@ void setup() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   
-  config.xclk_freq_hz = 20000000; // Tần số cao nhất (20MHz)
-
+  config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_VGA; 
-  config.jpeg_quality = 12; 
-
-  config.fb_count = 2; 
+  
+  // Giữ nguyên cấu hình tốc độ cao
+  config.frame_size = FRAMESIZE_QVGA; 
+  config.jpeg_quality = 15; 
+  config.fb_count = 1; // Nếu vẫn reset thì đổi số này thành 1
   config.grab_mode = CAMERA_GRAB_LATEST;
 
   if (esp_camera_init(&config) == ESP_OK) {
-    Serial.println("Camera OK - High Speed Mode");
+    Serial.println("Camera OK");
+    cam_ok = true;
   } else {
     lcd.setCursor(0, 1); lcd.print("Cam Error!");
     while(1);
@@ -227,12 +135,85 @@ void setup() {
   delay(1000);
 }
 
-// ==================== LOOP TỐC ĐỘ CAO ====================
+// ==================== CÁC HÀM KHÁC (GIỮ NGUYÊN) ====================
+void speak() {
+  if (current_objects == "scanning" || current_objects == "none" || current_objects == "") return;
+  if (current_objects == last_objects) return; 
+
+  last_objects = current_objects;
+  Serial.println(">>> CHOT KET QUA: " + current_objects);
+
+  int fileIndex = -1;
+  for (int i = 0; i < TOTAL_CLASSES; i++) {
+    if (current_objects.indexOf(OBJECT_NAMES[i]) != -1) {
+      fileIndex = i + 1;
+      break;
+    }
+  }
+  
+  if (fileIndex != -1) {
+    dfPlayer.play(fileIndex);
+    delay(2000); 
+  }
+}
+
+void updateLCD() {
+  if (current_objects == "scanning") {
+     if (last_display != "scanning") {
+        lcd.clear();
+        lcd.setCursor(0, 0); lcd.print("Processing...");
+        lcd.setCursor(0, 1); lcd.print("Scanning...");
+        last_display = "scanning";
+     }
+     return;
+  }
+
+  if (current_objects == last_display) return;
+  last_display = current_objects;
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Result:");
+  lcd.setCursor(0, 1);
+  if (current_objects == "none" || current_objects == "") {
+    lcd.print("No Object");
+  } else {
+    String show = current_objects;
+    if (show.length() > 16) show = show.substring(0, 16);
+    lcd.print(show);
+  }
+}
+
+void sendFrame() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (!fb) return;
+
+  HTTPClient http;
+  http.setReuse(true); 
+  http.begin(server_url);
+  http.addHeader("Content-Type", "image/jpeg"); 
+
+  int httpCode = http.POST(fb->buf, fb->len);
+
+  if (httpCode == 200) {
+    String payload = http.getString();
+    payload.trim();
+    if (payload.length() > 0) {
+      current_objects = payload;
+      if (payload == "scanning") Serial.print("."); 
+      else Serial.println("\nDONE: " + payload);
+    }
+  }
+  http.end();
+  esp_camera_fb_return(fb); 
+}
+
 void loop() {
-  if (wifi_ok) {
-    sendFrame();   // Gửi ảnh liên tục
-    updateLCD();   // Cập nhật màn hình (Scanning...)
-    speak();       // Chỉ phát loa khi Server chốt kết quả
+  if (wifi_ok && cam_ok) {
+    sendFrame();   
+    updateLCD();   
+    speak();       
   }
   delay(100); 
 }
