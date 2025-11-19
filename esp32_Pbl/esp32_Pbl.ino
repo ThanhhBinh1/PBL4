@@ -32,7 +32,7 @@ const char* OBJECT_NAMES[] = {
 const int TOTAL_CLASSES = 113;
 
 // ==================== PHẦN CỨNG ====================
-LiquidCrystal_I2C lcd(0x3F, 16, 2); 
+LiquidCrystal_I2C lcd(0x27, 16, 2); 
 
 #define DFPLAYER_RX_PIN 13 
 #define DFPLAYER_TX_PIN 12 
