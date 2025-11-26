@@ -105,3 +105,5 @@ def get_audio():
 if __name__ == "__main__":
     # Thay IP bằng IP máy bạn
     app.run(host="0.0.0.0", port=5000, threaded=True, debug=False)
+
+//chuoi
