@@ -8,7 +8,7 @@
 // --- CẤU HÌNH ---
 const char* ssid = "notB";
 const char* password = "22222222";
-const char* server_url = "http://172.24.66.50:5000/audio"; // API Audio
+const char* server_url = "http://10.22.168.100:5000/audio";
 
 // --- LIST VẬT THỂ (Copy y nguyên list 113 món cũ vào đây) ---
 const char* OBJECT_NAMES[] = {
