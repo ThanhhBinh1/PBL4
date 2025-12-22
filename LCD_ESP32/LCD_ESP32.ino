@@ -6,15 +6,15 @@
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 
-// --- CẤU HÌNH MẠNG ---
+// --- CẤU HÌNH ---
 const char* ssid = "notB";
 const char* password = "22222222";
-const char* server_url = "http://10.22.168.100:5000/detect";
+// SỬA IP NÀY CHO ĐÚNG VỚI MÁY TÍNH CỦA BẠN (LỆNH ipconfig)
+const char* server_url = "http://10.71.89.100:5000/detect"; 
 
-// --- LCD ---
 LiquidCrystal_I2C lcd(0x27, 16, 2); 
 
-// --- CAMERA PINS ---
+// --- PIN CAM ---
 #define PWDN_GPIO_NUM     32
 #define RESET_GPIO_NUM    -1
 #define XCLK_GPIO_NUM     0
@@ -32,41 +32,42 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 #define HREF_GPIO_NUM     23
 #define PCLK_GPIO_NUM     22
 
-HTTPClient http; // Khai báo toàn cục để dùng lại kết nối
+HTTPClient http;
 String last_display = "";
 
-// Hàm LCD tối ưu RAM
-void updateLCD(const String &text) {
+void updateLCD(String text) {
+  text.trim();
   if (text == last_display) return;
+  
   lcd.clear();
+  lcd.setCursor(0,0);
+  
   if (text == "scanning") {
-      lcd.setCursor(0,0); lcd.print("Dang quet...");
+    lcd.print("Dang quet...");
+    lcd.setCursor(0,1); lcd.print("Cho 7 anh...");
   } else if (text == "error") {
-      lcd.setCursor(0,0); lcd.print("Loi Server");
+    lcd.print("Loi Server");
   } else {
-      lcd.setCursor(0,0); lcd.print("Phat hien:");
-      lcd.setCursor(0,1); 
-      if (text.length() > 16) lcd.print(text.substring(0, 16));
-      else lcd.print(text);
+    // ĐÂY LÀ LÚC NHẬN ĐƯỢC WINNER
+    lcd.print("Ket qua:");
+    lcd.setCursor(0,1);
+    lcd.print(text); // In tên tiếng Anh (Winner)
   }
   last_display = text;
 }
 
 void setup() {
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); 
+  setCpuFrequencyMhz(240);
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
   Serial.begin(115200);
-
-  // 1. LCD
-  Wire.begin(15, 14); 
+  
+  Wire.begin(15, 14); // SDA, SCL cho LCD
   lcd.init(); lcd.backlight();
-  lcd.print("No PSRAM Mode");
-
-  // 2. WiFi
+  
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) { delay(500); }
-  lcd.clear(); lcd.print("WiFi OK!");
+  lcd.print("WiFi OK!"); delay(1000);
 
-  // 3. CẤU HÌNH CAMERA (TỐI ƯU CHO RAM YẾU)
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -76,77 +77,32 @@ void setup() {
   config.pin_pclk = PCLK_GPIO_NUM; config.pin_vsync = VSYNC_GPIO_NUM; config.pin_href = HREF_GPIO_NUM;
   config.pin_sscb_sda = SIOD_GPIO_NUM; config.pin_sscb_scl = SIOC_GPIO_NUM;
   config.pin_pwdn = PWDN_GPIO_NUM; config.pin_reset = RESET_GPIO_NUM;
-  config.xclk_freq_hz = 20000000; // 20MHz
-  
+  config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-
-  // --- THIẾT LẬP QUAN TRỌNG NHẤT ---
-  // CIF (400x296) là giới hạn an toàn cao nhất cho chip không PSRAM
-  config.frame_size = FRAMESIZE_CIF; 
-  
-  // Chất lượng 12 là rất tốt, nếu vẫn lag có thể tăng lên 15-20
-  config.jpeg_quality = 12; 
-  
-  // BẮT BUỘC LÀ 1 (Vì không đủ RAM cho 2)
-  config.fb_count = 1; 
-  
+  config.frame_size = FRAMESIZE_CIF;
+  config.jpeg_quality = 12;
+  config.fb_count = 1;
   config.grab_mode = CAMERA_GRAB_LATEST; 
-
-  if (esp_camera_init(&config) != ESP_OK) {
-    lcd.clear(); lcd.print("Cam Init Fail");
-    ESP.restart();
-  }
   
-  // Bật chế độ tái sử dụng kết nối (Keep-Alive)
-  // Giúp gửi liên tục mà không cần bắt tay lại 3 bước TCP
+  esp_camera_init(&config);
   http.setReuse(true);
 }
 
 void loop() {
   if (WiFi.status() == WL_CONNECTED) {
-    
-    // BƯỚC 1: Lấy ảnh
     camera_fb_t *fb = esp_camera_fb_get();
-    if (!fb) {
-      Serial.println("Cam Fail");
-      // Nếu lỗi cam, reset nhẹ buffer rồi thử lại, không cần restart chip ngay
-      esp_camera_fb_return(fb); 
-      delay(100); 
-      return;
-    }
+    if (!fb) { esp_camera_fb_return(fb); return; }
 
-    // BƯỚC 2: Gửi siêu tốc
     http.begin(server_url);
     http.addHeader("Content-Type", "image/jpeg");
-    
     int httpCode = http.POST(fb->buf, fb->len);
-    
-    // BƯỚC 3: TRẢ RAM NGAY LẬP TỨC (Cực quan trọng với Buffer = 1)
-    esp_camera_fb_return(fb); 
-    fb = NULL;
+    esp_camera_fb_return(fb);
 
-    // BƯỚC 4: Xử lý kết quả
     if (httpCode == 200) {
-      String response = http.getString();
-      response.trim();
-      updateLCD(response);
+      updateLCD(http.getString()); // Hiển thị kết quả trả về từ Server
     } else {
       updateLCD("error");
-      // Nếu lỗi mạng, đóng kết nối để làm sạch socket
-      http.end(); 
     }
-    
-    // Mẹo: Nếu RAM tụt quá sâu, tự reset để tránh treo
-    if(ESP.getFreeHeap() < 20000) {
-        updateLCD("Reset RAM...");
-        ESP.restart();
-    }
-
-  } else {
-    WiFi.disconnect();
-    WiFi.reconnect();
   }
-  
-  // Delay cực nhỏ: Gần như real-time
-  delay(10); 
+  delay(50);
 }

@@ -1,16 +1,16 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
-#include <Arduino_JSON.h> // Cài thư viện "Arduino_JSON"
+#include <Arduino_JSON.h>
 #include <SoftwareSerial.h>
 #include <DFRobotDFPlayerMini.h>
 
-// --- CẤU HÌNH ---
 const char* ssid = "notB";
 const char* password = "22222222";
-const char* server_url = "http://10.22.168.100:5000/audio";
+// !!! SỬA IP CHO ĐÚNG !!!
+const char* server_url = "http://10.71.89.100:5000/audio"; 
 
-// --- LIST VẬT THỂ (Copy y nguyên list 113 món cũ vào đây) ---
+// --- List file nhạc trong thẻ nhớ SD phải khớp thứ tự này ---
 const char* OBJECT_NAMES[] = {
   "airplane", "ambulance", "apple", "banana", "battery", "bed", "bicycle", "bird", "biscuit", "boat", 
   "bowl", "box", "bread", "broccoli", "broom", "bucket", "butter", "butterfly", "can", "candle", 
@@ -27,34 +27,37 @@ const char* OBJECT_NAMES[] = {
 };
 const int TOTAL_CLASSES = 113;
 
-SoftwareSerial dfSerial(14, 12); // RX=D5, TX=D6
+SoftwareSerial dfSerial(14, 12); // D5=RX, D6=TX
 DFRobotDFPlayerMini dfPlayer;
 
 int last_batch_id = 0;
 
 void setup() {
   Serial.begin(115200);
-  
   dfSerial.begin(9600);
+  
   if(dfPlayer.begin(dfSerial)) {
     Serial.println("DFPlayer OK");
-    dfPlayer.volume(40);
+    dfPlayer.volume(30); // Âm lượng 0-30
+  } else {
+    Serial.println("DFPlayer Error!");
   }
 
   WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) { delay(500); }
-  Serial.println("WiFi OK");
+  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+  Serial.println("\nWiFi Connected");
 }
 
 void speak(String objectName) {
   int fileIndex = -1;
   for (int i = 0; i < TOTAL_CLASSES; i++) {
     if (objectName == String(OBJECT_NAMES[i])) {
-      fileIndex = i + 1;
+      fileIndex = i + 1; // File 0001.mp3 ứng với index 0
       break;
     }
   }
   if (fileIndex != -1) {
+    Serial.print("Playing File: "); Serial.println(fileIndex);
     dfPlayer.play(fileIndex);
   }
 }
@@ -74,12 +77,11 @@ void loop() {
         int batch_id = (int) myObject["batch_id"];
         String obj = (const char*) myObject["object"];
 
-        // Chỉ phát khi có ID mới (Server đã chốt đợt 5 ảnh mới)
-        if (batch_id != last_batch_id) {
+        // Nếu có ID mới -> Phát loa
+        if (batch_id > last_batch_id) {
            last_batch_id = batch_id;
-           Serial.println("New Audio: " + obj);
-           
-           if (obj != "none" && obj != "") {
+           Serial.println("New Detection: " + obj);
+           if (obj != "none") {
              speak(obj);
            }
         }
@@ -87,5 +89,5 @@ void loop() {
     }
     http.end();
   }
-  delay(200); // Kiểm tra server liên tục
+  delay(300); // Check server mỗi 300ms
 }
